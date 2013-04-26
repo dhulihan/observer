@@ -1,0 +1,86 @@
+#!/usr/bin/env ruby
+
+require 'logger'
+require "fileutils"
+require 'pty'
+
+class Timelapse
+	FPS = 0.001 # every 10 minutes
+	IMAGE_SIZE = "640x480"
+	IMAGE_DIR = "~/Pictures/Timelapse"
+	IMAGE_FORMAT = "jpeg"
+
+
+	class << self
+		# get array of video devices
+
+		attr_accessor :logger
+
+		def logger
+			@logger = Logger.new(STDOUT)
+			@logger.level = Logger::DEBUG # set to WARN for normal use, DEBUG for debugging
+			return @logger
+		end
+
+		def devices
+			cmd = "v4l2-ctl --list-devices"
+
+			begin
+				PTY.spawn( cmd ) do |r, w, pid|
+					begin
+						devices = Array.new
+						r.each { |line| 
+							if line =~ /\/dev\//
+								devices << line.strip
+							end 
+						}
+					rescue Errno::EIO
+						#puts "Errno:EIO error, but this probably just means " + "that the process has finished giving output"
+					ensure
+						return devices
+					end
+				end
+			rescue PTY::ChildExited
+				puts "The child process exited!"
+			end			
+		end
+
+		def start
+			begin
+				pids = []
+				for device in devices
+					# Generate filename
+					datestamp = Time.now.strftime("%Y.%m.%d.%H.%M.%S")
+					filename = datestamp + "-0000" + "." + IMAGE_FORMAT
+
+					# Generate destination directory
+					device_name = device.split("/").last
+					dst_dir = File.expand_path(File.join(IMAGE_DIR, device_name))
+					image_path = File.join(dst_dir, filename)
+					
+					# Create directory
+					logger.debug("Creating directory: #{dst_dir}")
+					FileUtils.mkdir_p(dst_dir)
+
+					cmd = "streamer -r #{sprintf("%.3f", FPS)} -c #{device} -f #{IMAGE_FORMAT} -o #{image_path} -s #{IMAGE_SIZE} -t 99999"
+
+					pids << Kernel.fork { system(cmd) }
+				end			
+
+				# Wait on processes to finish
+				pids.each do |pid| 
+					Process.wait(pid) 
+				end
+
+			rescue SystemExit, Interrupt
+			  raise
+			rescue Exception => e
+			  puts "Exiting..."
+			  #pids.each { |pid| Process.wait(pid) }
+			end 		
+		end
+	end 
+end
+
+puts "Starting Timelapse script..."
+Timelapse.start

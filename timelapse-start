@@ -2,7 +2,7 @@
 
 require 'logger'
 require "fileutils"
-require 'pty'
+require 'pty' 
 
 class Timelapse
 	FPS = 0.001 # every 10 minutes

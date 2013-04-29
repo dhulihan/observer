@@ -10,7 +10,6 @@ class Timelapse
 	IMAGE_DIR = "~/Pictures/Timelapse"
 	IMAGE_FORMAT = "jpeg"
 
-
 	class << self
 		# get array of video devices
 

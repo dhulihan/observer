@@ -1,0 +1,94 @@
+#!/usr/bin/env ruby
+
+require 'logger'
+require "fileutils"
+require 'pty' 
+
+class Timelapse
+	FPS = 0.001 # every 10 minutes
+	IMAGE_SIZE = "640x480"
+	IMAGE_DIR = "~/Pictures/Timelapse"
+	IMAGE_FORMAT = "jpeg"
+
+
+	class << self
+		# get array of video devices
+
+		attr_accessor :logger
+
+		def logger
+			@logger = Logger.new(STDOUT)
+			@logger.level = Logger::DEBUG # set to WARN for normal use, DEBUG for debugging
+			return @logger
+		end
+
+		def devices
+			cmd = "v4l2-ctl --list-devices"
+
+			begin
+				PTY.spawn( cmd ) do |r, w, pid|
+					begin
+						devices = Array.new
+						r.each { |line| 
+							if line =~ /\/dev\//
+								devices << line.strip
+							end 
+						}
+					rescue Errno::EIO
+						#puts "Errno:EIO error, but this probably just means " + "that the process has finished giving output"
+					ensure
+						return devices
+					end
+				end
+			rescue PTY::ChildExited
+				puts "The child process exited!"
+			end			
+		end
+
+		# Grab a single image from each camera. Good for setup in cron jobs
+		def snap
+			count = 0
+			begin
+				pids = []
+				for device in devices
+					# Generate filename
+					datestamp = Time.now.strftime("%Y.%m.%d.%H.%M.%S")
+					filename = datestamp + "." + IMAGE_FORMAT
+
+					# Generate destination directory
+					device_name = device.split("/").last
+					dst_dir = File.expand_path(File.join(IMAGE_DIR, device_name))
+					image_path = File.join(dst_dir, filename)
+					
+					# Create directory
+					unless Dir.exists?(dst_dir)
+						logger.debug("Creating directory: #{dst_dir}")
+						FileUtils.mkdir_p(dst_dir)
+					end
+
+					cmd = "streamer -c #{device} -f #{IMAGE_FORMAT} -o #{image_path} -s #{IMAGE_SIZE} -t 1"
+
+					pids << Kernel.fork { system(cmd) }
+
+					count += 1 
+				end			
+
+				# Wait on processes to finish
+				pids.each do |pid| 
+					Process.wait(pid) 
+				end
+			rescue SystemExit, Interrupt
+			  raise
+			rescue Exception => e
+			  puts "Exiting..."
+			  #pids.each { |pid| Process.wait(pid) }
+			ensure
+				return count
+			end 
+		end
+	end 
+end
+
+puts "Starting Timelapse script..."
+count = Timelapse.snap
+puts "\n#{count} images captured."
